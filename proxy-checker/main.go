@@ -14,43 +14,54 @@ import (
 
 const (
 	// Proxy Server List URL
-	HTTP_PROXY_LIST_URL  = "https://www.proxyscan.io/download?type=http"
-	HTTPS_PROXY_LIST_URL = "https://www.proxyscan.io/download?type=https"
+	HTTP_PROXY_LIST_URL  = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"
+	SOCKS4_PROXY_LIST_URL = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt"
+	SOCKS5_PROXY_LIST_URL = "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"
 
-	// Working Proxy Filename
-	WorkingProxyFilename = "working_proxies.txt"
+	// Working Proxy Filenames
+	HTTP_WORKING_PROXY_FILENAME  = "http_working_proxies.txt"
+	SOCKS4_WORKING_PROXY_FILENAME = "socks4_working_proxies.txt"
+	SOCKS5_WORKING_PROXY_FILENAME = "socks5_working_proxies.txt"
 )
 
 func main() {
 	// Create a Resty Client
 	client := resty.New()
 
-	// Create a request
-	httpProxyResponse, _ := client.R().Get(HTTP_PROXY_LIST_URL)
-	httpsProxyResponse, _ := client.R().Get(HTTPS_PROXY_LIST_URL)
-
-	// Check if the HTTP Proxy List response has errors
-	if httpProxyResponse.StatusCode() != http.StatusOK {
-		log.Fatalln("Getting HTTP Proxy List failed:", httpProxyResponse.StatusCode())
+	// Create a request to fetch HTTP proxy list
+	httpProxyResponse, err := client.R().Get(HTTP_PROXY_LIST_URL)
+	if err != nil || httpProxyResponse.StatusCode() != http.StatusOK {
+		log.Println("Getting HTTP Proxy List failed:", err, httpProxyResponse.StatusCode())
 	}
 
-	// Check if the HTTPS Proxy List response has errors
-	if httpsProxyResponse.StatusCode() != http.StatusOK {
-		log.Fatalln("Getting HTTPS Proxy List failed:", httpsProxyResponse.StatusCode())
+	// Create a request to fetch SOCKS4 proxy list
+	socks4ProxyResponse, err := client.R().Get(SOCKS4_PROXY_LIST_URL)
+	if err != nil || socks4ProxyResponse.StatusCode() != http.StatusOK {
+		log.Println("Getting SOCKS4 Proxy List failed:", err, socks4ProxyResponse.StatusCode())
 	}
 
-	// Split the proxy lists into arrays of strings
-	httpProxies := strings.Split(string(httpProxyResponse.Body()), "\n")
-	httpsProxies := strings.Split(string(httpsProxyResponse.Body()), "\n")
-
-	// Remove working proxies file if it exists
-	if _, err := os.Stat(WorkingProxyFilename); err == nil {
-		fmt.Println("Removing", WorkingProxyFilename)
-		fmt.Println("")
-		if err := os.Remove(WorkingProxyFilename); err != nil {
-			fmt.Println("Failed to remove", WorkingProxyFilename)
-		}
+	// Create a request to fetch SOCKS5 proxy list
+	socks5ProxyResponse, err := client.R().Get(SOCKS5_PROXY_LIST_URL)
+	if err != nil || socks5ProxyResponse.StatusCode() != http.StatusOK {
+		log.Println("Getting SOCKS5 Proxy List failed:", err, socks5ProxyResponse.StatusCode())
 	}
+
+	// Split the proxy lists into arrays of strings, only if the responses were successful
+	var httpProxies, socks4Proxies, socks5Proxies []string
+	if httpProxyResponse.StatusCode() == http.StatusOK {
+		httpProxies = strings.Split(string(httpProxyResponse.Body()), "\n")
+	}
+	if socks4ProxyResponse.StatusCode() == http.StatusOK {
+		socks4Proxies = strings.Split(string(socks4ProxyResponse.Body()), "\n")
+	}
+	if socks5ProxyResponse.StatusCode() == http.StatusOK {
+		socks5Proxies = strings.Split(string(socks5ProxyResponse.Body()), "\n")
+	}
+
+	// Remove existing proxy files if they exist
+	removeFileIfExists(HTTP_WORKING_PROXY_FILENAME)
+	removeFileIfExists(SOCKS4_WORKING_PROXY_FILENAME)
+	removeFileIfExists(SOCKS5_WORKING_PROXY_FILENAME)
 
 	// Create a WaitGroup to wait for all goroutines to complete
 	var wg sync.WaitGroup
@@ -61,18 +72,28 @@ func main() {
 
 		go func(proxy string) {
 			defer wg.Done() // Decrement the WaitGroup counter when this goroutine completes
-			processProxy(proxy, "http://", WorkingProxyFilename)
+			processProxy(proxy, "http://", HTTP_WORKING_PROXY_FILENAME)
 		}(httpProxyServer)
 	}
 
-	// Loop over the HTTPS proxies and launch a goroutine for each one
-	for _, httpsProxyServer := range httpsProxies {
+	// Loop over the SOCKS4 proxies and launch a goroutine for each one
+	for _, socks4ProxyServer := range socks4Proxies {
 		wg.Add(1) // Increment the WaitGroup counter
 
 		go func(proxy string) {
 			defer wg.Done() // Decrement the WaitGroup counter when this goroutine completes
-			processProxy(proxy, "https://", WorkingProxyFilename)
-		}(httpsProxyServer)
+			processProxy(proxy, "socks4://", SOCKS4_WORKING_PROXY_FILENAME)
+		}(socks4ProxyServer)
+	}
+
+	// Loop over the SOCKS5 proxies and launch a goroutine for each one
+	for _, socks5ProxyServer := range socks5Proxies {
+		wg.Add(1) // Increment the WaitGroup counter
+
+		go func(proxy string) {
+			defer wg.Done() // Decrement the WaitGroup counter when this goroutine completes
+			processProxy(proxy, "socks5://", SOCKS5_WORKING_PROXY_FILENAME)
+		}(socks5ProxyServer)
 	}
 
 	// Wait for all goroutines to complete
@@ -104,12 +125,23 @@ func processProxy(proxy, prefix, proxyFilename string) {
 	// Open the working proxies list file
 	f, err := os.OpenFile(proxyFilename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		fmt.Println("Failed to open proxy.txt file")
+		fmt.Println("Failed to open proxy file:", proxyFilename)
+		return
 	}
 	defer f.Close()
 
 	// Write the proxy server to the file
 	if _, err := f.WriteString(proxy + "\n"); err != nil {
-		fmt.Println("Failed to write proxy.txt file, with error:", err)
+		fmt.Println("Failed to write to file:", proxyFilename, "with error:", err)
+	}
+}
+
+// Helper function to remove a file if it exists
+func removeFileIfExists(filename string) {
+	if _, err := os.Stat(filename); err == nil {
+		fmt.Println("Removing", filename)
+		if err := os.Remove(filename); err != nil {
+			fmt.Println("Failed to remove", filename)
+		}
 	}
 }
