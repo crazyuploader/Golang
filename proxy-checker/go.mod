@@ -2,7 +2,7 @@ module ProxyChecker
 
 go 1.23.0
 
-toolchain go1.25.5
+toolchain go1.25.6
 
 require github.com/go-resty/resty/v2 v2.17.1
 
